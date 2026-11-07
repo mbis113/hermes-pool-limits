@@ -363,6 +363,24 @@ def _ordered(windows: List[List[Any]]) -> List[List[Any]]:
     return sorted(windows, key=lambda w: _WINDOW_RANK.get(w[0], len(_WINDOW_RANK)))
 
 
+def _effective_windows(windows: List[List[Any]], now: Optional[int] = None) -> List[List[Any]]:
+    """Show zero short-window availability while a longer quota blocks requests.
+
+    This is a display projection, not a change to provider data. A passed reset
+    boundary releases the mask even if a cached upstream reply still says 100%.
+    """
+    if now is None:
+        now = int(datetime.now(timezone.utc).timestamp())
+    blocked = any(
+        (label == "Неделя" or "неделя" in str(label).lower() or "месяц" in str(label).lower())
+        and isinstance(used, (int, float)) and not isinstance(used, bool)
+        and used >= 100 and (reset is None or reset > now)
+        for label, used, reset in windows
+    )
+    return [[label, 100.0 if blocked and label == "5 часов" and used is not None else used, reset]
+            for label, used, reset in windows]
+
+
 def _glm_usage(key: str, origin: str) -> Dict[str, Any]:
     payload = _get_json(origin + GLM_QUOTA_PATH, {"Authorization": f"Bearer {key}",
                                                   "Accept": "application/json"})
@@ -477,7 +495,9 @@ def collect(auth_dir: Optional[str] = None) -> Dict[str, Any]:
         start = len(accounts) + 1
         accounts += list(pool.map(lambda item: _api_account(start + item[0], item[1][0], item[1][1], item[1][2]),
                                   enumerate(subs[:MAX_ACCOUNTS - len(accounts)])))
-    return {"ok": True, "n": len(files) + len(subs), "accounts": accounts}
+    return {"ok": True, "n": len(files) + len(subs), "accounts": [
+        {**account, "w": _effective_windows(account["w"])} for account in accounts
+    ]}
 
 
 def main(argv: Optional[List[str]] = None) -> int:
