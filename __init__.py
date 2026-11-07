@@ -9,7 +9,7 @@ Gateway slash commands registered here (no LLM call, instant reply):
   header ``📊 Остатки подписок — ДД.ММ``, one bare-name block per account
   (Codex / GLM / Kimi), windows in pool_usage.py order, remaining % = 100 − used,
   all times in user-local UTC+3 (Татарстан, no DST).
-- ``/glm``, ``/glm53``, ``/sol`` — quick GLOBAL model switches. The real switch runs
+- ``/glm``, ``/sol`` — quick GLOBAL model switches. The real switch runs
   through ``quick_commands`` aliases in the profile config (rewrite to
   ``/model <model> --global``, which follows the built-in switch path with its
   confirmation). The handlers below are only fallback stubs for when the aliases are
@@ -29,7 +29,6 @@ _TZ_LOCAL = timezone(timedelta(hours=3))  # user-local: UTC+3, no DST
 
 _QUICK_MODELS = {
     "glm": "glm-5.3-flash",
-    "glm53": "glm-5.3",
     "sol": "gpt-6-sol",
 }
 
