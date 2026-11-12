@@ -575,21 +575,46 @@ function familyOf(model) {
   return /gpt|codex|\bo\d/.test(slug) ? 'codex' : null
 }
 
-/** Pool gauge for the chip: every account's 5-hour window averaged (a proxy
- *  rotates across accounts, so no single one is "current"); an account without
- *  a 5h window contributes its tightest window instead, and when no account
- *  has a 5h window at all the gauge degrades to the tightest mean. `fiveHour`
- *  says which of the two the number is, so labels can name it honestly. */
+/** Manually picked subscription: the proxy holds two separate GLM blocks (glm
+ *  and glm-a), and the model id selects one — an id ending in `-a` maps to the
+ *  account whose label also ends in `a`, an id without it to the plain label.
+ *  Fires only for a 2-account group split exactly that way, so single-account
+ *  families and Codex/Kimi groups keep the family average. */
+function pickSubscription(group, model) {
+  if (!model || group.length !== 2) {
+    return null
+  }
+
+  const slugOf = label => String(label ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  const marked = group.filter(account => /a$/.test(slugOf(account.label)))
+  const plain = group.filter(account => !/a$/.test(slugOf(account.label)))
+
+  if (marked.length !== 1 || plain.length !== 1) {
+    return null
+  }
+
+  return /(?:^|-)a$/.test(String(model).toLowerCase().replace(/[^a-z0-9]+/g, '-')) ? marked[0] : plain[0]
+}
+
+/** Pool gauge: with a manually picked subscription (see `pickSubscription`) it
+ *  is that account's own 5-hour window; otherwise every family account's
+ *  5-hour window is averaged (a rotating proxy has no "current" account). An
+ *  account without a 5h window contributes its tightest window instead, and
+ *  when no account has a 5h window at all the gauge degrades to the tightest
+ *  mean. `fiveHour` says which of the two the number is, so labels can name it
+ *  honestly; `picked` names the subscription when the gauge shows one. */
 function poolSummary(accounts, model) {
   const family = familyOf(model)
   const scoped = accounts.filter(account => account.kind === family)
   const group = scoped.length ? scoped : accounts
-  const fiveHourValues = group.map(fiveHour).filter(value => value !== null)
+  const picked = pickSubscription(group, model)
+  const effective = picked ? [picked] : group
+  const fiveHourValues = effective.map(fiveHour).filter(value => value !== null)
   const useFiveHour = fiveHourValues.length > 0
-  const readable = useFiveHour ? fiveHourValues : group.map(tightest).filter(value => value !== null)
+  const readable = useFiveHour ? fiveHourValues : effective.map(tightest).filter(value => value !== null)
 
   if (!readable.length) {
-    return { remaining: null, alive: 0, total: group.length, family: scoped.length ? family : null, fiveHour: false }
+    return { remaining: null, alive: 0, total: group.length, family: scoped.length ? family : null, picked: picked?.label ?? null, fiveHour: false }
   }
 
   return {
@@ -597,6 +622,7 @@ function poolSummary(accounts, model) {
     alive: readable.filter(value => value > 0).length,
     total: group.length,
     family: scoped.length ? family : null,
+    picked: picked?.label ?? null,
     fiveHour: useFiveHour
   }
 }
@@ -825,7 +851,7 @@ function PoolSection({ pool, model, update }) {
     style: { display: 'grid', gap: 12 },
     children: kinds.map(kind => {
       const accounts = pool.accounts.filter(account => account.kind === kind)
-      const summary = poolSummary(accounts, null)
+      const summary = poolSummary(accounts, model)
 
       return jsxs(
         'div',
@@ -840,9 +866,11 @@ function PoolSection({ pool, model, update }) {
                   style: { ...MUTED, color: toneColor(summary.remaining) },
                   children: summary.remaining === null
                     ? 'нет данных'
-                    : summary.fiveHour
-                      ? `5ч ${summary.remaining}% · живых ${summary.alive}`
-                      : `в среднем ${summary.remaining}% · живых ${summary.alive}`
+                    : summary.picked
+                      ? `${summary.fiveHour ? '5ч' : 'мин'} ${summary.remaining}% · ${summary.picked}`
+                      : summary.fiveHour
+                        ? `5ч ${summary.remaining}% · живых ${summary.alive}`
+                        : `в среднем ${summary.remaining}% · живых ${summary.alive}`
                 })
               ]
             }),
@@ -1041,7 +1069,9 @@ function LimitsChip() {
   const label = remaining === null ? (loading ? '…' : '—') : `${remaining}%`
 
   const detail = summary
-    ? `пул${summary.family ? ` ${KIND_LABELS[summary.family]}` : ''}: ${summary.fiveHour ? '5-часовой лимит, в среднем' : 'в среднем'} осталось ${summary.remaining ?? '—'}% · живых аккаунтов ${summary.alive} из ${summary.total}`
+    ? summary.picked
+      ? `пул${summary.family ? ` ${KIND_LABELS[summary.family]}` : ''} · ${summary.picked}: ${summary.fiveHour ? '5-часовое окно' : 'ближайшее окно'} осталось ${summary.remaining ?? '—'}%`
+      : `пул${summary.family ? ` ${KIND_LABELS[summary.family]}` : ''}: ${summary.fiveHour ? '5-часовой лимит, в среднем' : 'в среднем'} осталось ${summary.remaining ?? '—'}% · живых аккаунтов ${summary.alive} из ${summary.total}`
     : remaining !== null
       ? fiveHour(account) !== null
         ? `5-часовое окно: осталось ${remaining}%`
